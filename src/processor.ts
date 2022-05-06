@@ -1,34 +1,38 @@
-import { SubstrateEvmProcessor } from "@subsquid/substrate-evm-processor";
+import { EvmLogHandlerContext, SubstrateEvmProcessor } from "@subsquid/substrate-evm-processor";
 import { lookupArchive } from "@subsquid/archive-registry";
-import {
-  CHAIN_NODE,
-  contract,
-  createContractEntity,
-  processTransfer,
-} from "./contract";
-import { events } from "./abi/erc721";
+import { events } from "./abi/bank-safe";
+import { Investement } from "./model";
 
 const processor = new SubstrateEvmProcessor("astar-substrate");
 
 processor.setBatchSize(500);
 
 processor.setDataSource({
-  chain: CHAIN_NODE,
+  chain: "wss://astar.api.onfinality.io/public-ws",
   archive: lookupArchive("astar")[0].url,
 });
 
 processor.setTypesBundle("astar");
-
-processor.addPreHook({ range: { from: 0, to: 0 } }, async (ctx) => {
-  await ctx.store.save(createContractEntity());
-});
-
 processor.addEvmLogHandler(
-  contract.address,
+  "0xd89dEa2daC8Fb73F4107C2cbeA5Eb36dab511F64".toLowerCase(),
   {
-    filter: [events["Transfer(address,address,uint256)"].topic],
+      filter: [events["InvestDeposited(uint256)"].topic],
+      range: {from: 864889}
   },
-  processTransfer
+  bankSafeHandler
 );
 
 processor.run();
+
+export async function bankSafeHandler(
+  ctx: EvmLogHandlerContext
+): Promise<void> {
+  const investDeposit = events["InvestDeposited(uint256)"].decode(ctx);
+  await ctx.store.save(
+      new Investement({
+          id: ctx.txHash,
+          timestamp: BigInt(ctx.substrate.block.timestamp),
+          value: (Number(investDeposit.amount) / 1e6)
+      })
+  )
+}
