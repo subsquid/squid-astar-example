@@ -3,7 +3,6 @@ import { Store, TypeormDatabase } from "@subsquid/typeorm-store";
 import {
   BatchContext,
   BatchProcessorItem,
-  EvmLogEvent,
   SubstrateBatchProcessor,
   SubstrateBlock,
 } from "@subsquid/substrate-processor";
@@ -14,6 +13,7 @@ import {
   getContractEntity,
   getTokenURI,
   astarCatsContract,
+  contractMapping,
 } from "./contract";
 import { Owner, Token, Transfer } from "./model";
 import * as erc721 from "./abi/erc721";
@@ -21,6 +21,7 @@ import * as erc721 from "./abi/erc721";
 const database = new TypeormDatabase();
 const processor = new SubstrateBatchProcessor()
   .setBatchSize(500)
+  .setBlockRange({ from: 442693 })
   .setDataSource({
     chain: CHAIN_NODE,
     archive: lookupArchive("astar", { release: "FireSquid" }),
@@ -125,10 +126,10 @@ async function saveTransfers(ctx: Context, transfersData: TransferData[]) {
       owners.set(to.id, to);
     }
 
-    let token = tokens.get(transferData.token);
+    let token = tokens.get(`${contractMapping.get(transferData.contractAddress)?.contractModel.symbol}-${transferData.token}`);
     if (token == null) {
       token = new Token({
-        id: transferData.token,
+        id: `${contractMapping.get(transferData.contractAddress)?.contractModel.symbol}-${transferData.token}`,
         uri: await getTokenURI(transferData.token, transferData.contractAddress),
         contract: await getContractEntity(ctx.store, transferData.contractAddress),
       });
