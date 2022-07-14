@@ -126,10 +126,10 @@ async function saveTransfers(ctx: Context, transfersData: TransferData[]) {
       owners.set(to.id, to);
     }
 
-    let token = tokens.get(`${contractMapping.get(transferData.contractAddress)?.contractModel.symbol}-${transferData.token}`);
+    let token = tokens.get(`${contractMapping.get(transferData.contractAddress)?.contractModel.symbol || ""}-${transferData.token}`);
     if (token == null) {
       token = new Token({
-        id: `${contractMapping.get(transferData.contractAddress)?.contractModel.symbol}-${transferData.token}`,
+        id: `${contractMapping.get(transferData.contractAddress)?.contractModel.symbol || ""}-${transferData.token}`,
         uri: await getTokenURI(transferData.token, transferData.contractAddress),
         contract: await getContractEntity(ctx.store, transferData.contractAddress),
       });

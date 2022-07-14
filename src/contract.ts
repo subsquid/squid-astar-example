@@ -3,7 +3,7 @@ import { ethers } from "ethers";
 import * as erc721 from "./abi/erc721";
 import { Contract } from "./model";
 
-export const CHAIN_NODE = "wss://astar.public.blastapi.io";
+export const CHAIN_NODE = "wss://public-rpc.pinknode.io/astar";
 
 interface ContractInfo {
   ethersContract: ethers.Contract;
