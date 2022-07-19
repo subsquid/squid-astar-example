@@ -76,7 +76,7 @@ function handleTransfer(
 
   const transfer: TransferData = {
     id: event.id,
-    token: `${contractMapping.get(event.args.address)?.contractModel.symbol || ""}-${tokenId.toString()}`,
+    token: tokenId.toString(),
     from,
     to,
     timestamp: BigInt(block.timestamp),
@@ -92,8 +92,12 @@ async function saveTransfers(ctx: Context, transfersData: TransferData[]) {
   const tokensIds: Set<string> = new Set();
   const ownersIds: Set<string> = new Set();
 
+  function getCollectionAndTokenId (transferData: TransferData): string{
+    return `${contractMapping.get(transferData.contractAddress)?.contractModel.symbol || ""}-${transferData.token}`;
+  }
+
   for (const transferData of transfersData) {
-    tokensIds.add(transferData.token);
+    tokensIds.add(getCollectionAndTokenId(transferData));
     ownersIds.add(transferData.from);
     ownersIds.add(transferData.to);
   }
@@ -127,10 +131,10 @@ async function saveTransfers(ctx: Context, transfersData: TransferData[]) {
       owners.set(to.id, to);
     }
 
-    let token = tokens.get(transferData.token);
+    let token = tokens.get(getCollectionAndTokenId(transferData));
     if (token == null) {
       token = new Token({
-        id: transferData.token,
+        id: getCollectionAndTokenId(transferData),
         uri: await getTokenURI(transferData.token, transferData.contractAddress),
         contract: await getContractEntity(ctx.store, transferData.contractAddress),
       });
