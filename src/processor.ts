@@ -3,6 +3,7 @@ import { Store, TypeormDatabase } from "@subsquid/typeorm-store";
 import {
   BatchContext,
   BatchProcessorItem,
+  EvmLogEvent,
   SubstrateBatchProcessor,
   SubstrateBlock,
 } from "@subsquid/substrate-processor";
@@ -67,7 +68,7 @@ type TransferData = {
 
 function handleTransfer(
   block: SubstrateBlock,
-  event: any // don't like this, but complains about merged type if you put EvmLogEvent
+  event: EvmLogEvent
 ): TransferData {
   const { from, to, tokenId } = erc721.events[
     "Transfer(address,address,uint256)"
@@ -75,7 +76,7 @@ function handleTransfer(
 
   const transfer: TransferData = {
     id: event.id,
-    token: tokenId.toString(),
+    token: `${contractMapping.get(event.args.address)?.contractModel.symbol || ""}-${tokenId.toString()}`,
     from,
     to,
     timestamp: BigInt(block.timestamp),
@@ -126,10 +127,10 @@ async function saveTransfers(ctx: Context, transfersData: TransferData[]) {
       owners.set(to.id, to);
     }
 
-    let token = tokens.get(`${contractMapping.get(transferData.contractAddress)?.contractModel.symbol || ""}-${transferData.token}`);
+    let token = tokens.get(transferData.token);
     if (token == null) {
       token = new Token({
-        id: `${contractMapping.get(transferData.contractAddress)?.contractModel.symbol || ""}-${transferData.token}`,
+        id: transferData.token,
         uri: await getTokenURI(transferData.token, transferData.contractAddress),
         contract: await getContractEntity(ctx.store, transferData.contractAddress),
       });
