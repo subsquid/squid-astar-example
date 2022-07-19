@@ -72,7 +72,7 @@ function handleTransfer(
 ): TransferData {
   const { from, to, tokenId } = erc721.events[
     "Transfer(address,address,uint256)"
-  ].decode(event.args);
+  ].decode(event.args); 
 
   const transfer: TransferData = {
     id: event.id,
