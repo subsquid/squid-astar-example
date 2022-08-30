@@ -60,7 +60,7 @@ processor.run(new TypeormDatabase(), async ctx => {
       txs.push(tx)
     }
   } 
-  ctx.store.save(txs)
+  await ctx.store.save(txs)
 })
 
 
