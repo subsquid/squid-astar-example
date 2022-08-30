@@ -40,7 +40,7 @@ processor.run(new TypeormDatabase(), async ctx => {
 
       let input = decodeInput(transaction.data)
 
-      if (transaction.to == undefined || transaction.from == undefined || input == undefined) {
+      if (transaction.to == undefined || transaction.from == undefined) {
         ctx.log.debug(`Skipping tx ${transaction.hash}`)
         continue;
       }
@@ -53,7 +53,7 @@ processor.run(new TypeormDatabase(), async ctx => {
           from: transaction.from,
           to: transaction.to,
           type: transaction.type || 0,
-          method: input?.method || 'unknown',
+          method: input.method,
           input: toJSON(input)
       })
       ctx.log.debug(`Tx: ${tx.txHash}, From: ${tx.from} To: ${tx.to} Method: ${tx.method}`)
@@ -64,7 +64,7 @@ processor.run(new TypeormDatabase(), async ctx => {
 })
 
 
-function decodeInput(input: string): {method: string, args: any[]} | undefined {
+function decodeInput(input: string): {method: string, args: any[]}  {
     let sighash = input.slice(0, 10)
 
     switch (sighash) {
@@ -90,7 +90,7 @@ function decodeInput(input: string): {method: string, args: any[]} | undefined {
             }
         }
         default:
-            return undefined
+            return  { method: 'unknown', args: [] }
     }
 }
 
