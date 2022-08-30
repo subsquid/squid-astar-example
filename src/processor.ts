@@ -90,7 +90,7 @@ function decodeInput(input: string): {method: string, args: any[]}  {
             }
         }
         default:
-            return  { method: 'unknown', args: [] }
+            return  { method: 'unknown', args: [input] }
     }
 }
 
