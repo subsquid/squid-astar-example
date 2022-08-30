@@ -1,31 +1,33 @@
-type Token @entity {
+type Transaction @entity {
   id: ID!
-  owner: Owner
-  uri: String
-  transfers: [Transfer!]! @derivedFrom(field: "token")
-  contract: Contract
-}
-
-type Owner @entity {
-  id: ID!
-  ownedTokens: [Token!]! @derivedFrom(field: "owner")
-  balance: BigInt
-}
-
-type Contract @entity {
-  id: ID!
-  name: String
-  symbol: String
-  totalSupply: BigInt
-  mintedTokens: [Token!]! @derivedFrom(field: "contract")
-}
-
-type Transfer @entity {
-  id: ID!
-  token: Token!
-  from: Owner
-  to: Owner
-  timestamp: BigInt!
   block: Int!
-  transactionHash: String!
+  timestamp: DateTime!
+  from: String! @index
+  to: String! @index
+  txHash: String! @index
+  type: Int!
+  input: JSON!
+  method: String!
+  data: TransactionData 
+}
+
+union TransactionData = Legacy | EIP2930 | EIP1559
+
+type Legacy {
+  gasLimit: BigInt!
+  gasPrice: BigInt!
+  value: BigInt!
+}
+
+type EIP2930 {
+  gasLimit: BigInt!
+  gasPrice: BigInt!
+  value: BigInt!
+}
+
+type EIP1559 {
+  gasLimit: BigInt!
+  maxPriorityFeePerGas: BigInt!
+  maxFeePerGas: BigInt!
+  value: BigInt!
 }

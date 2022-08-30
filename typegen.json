@@ -1,7 +1,8 @@
+
 {
   "outDir": "src/types",
   "specVersions": "https://astar.archive.subsquid.io/graphql",
-  "typesBundle": "astar",
-  "events": [],
-  "calls": []
+  "calls": [
+    "Ethereum.transact"
+  ]
 }

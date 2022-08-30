@@ -1,163 +1,194 @@
-import { lookupArchive } from "@subsquid/archive-registry";
-import { Store, TypeormDatabase } from "@subsquid/typeorm-store";
-import {
-  BatchContext,
-  BatchProcessorItem,
-  EvmLogEvent,
-  SubstrateBatchProcessor,
-  SubstrateBlock,
-} from "@subsquid/substrate-processor";
-import { In } from "typeorm";
-import {
-  CHAIN_NODE,
-  astarDegenscontract,
-  getContractEntity,
-  getTokenURI,
-  astarCatsContract,
-  contractMapping,
-} from "./contract";
-import { Owner, Token, Transfer } from "./model";
-import * as erc721 from "./abi/erc721";
+import {SubstrateBatchProcessor, SubstrateProcessor, toHex} from '@subsquid/substrate-processor'
+import {TypeormDatabase} from '@subsquid/typeorm-store'
+import {ethers, UnsignedTransaction} from 'ethers'
+import {SignatureLike} from '@ethersproject/bytes'
+import * as erc20 from './erc20'
+import {Transaction} from './model'
+import {EthereumTransactCall} from './types/calls'
+import {CallContext} from './types/support'
+import {toJSON} from '@subsquid/util-internal-json'
+import { lookupArchive } from '@subsquid/archive-registry'
+import assert from 'assert'
 
-const database = new TypeormDatabase();
+
 const processor = new SubstrateBatchProcessor()
-  .setBatchSize(500)
-  .setBlockRange({ from: 442693 })
-  .setDataSource({
-    chain: CHAIN_NODE,
-    archive: lookupArchive("astar", { release: "FireSquid" }),
+
+
+processor.setDataSource({
+      archive: lookupArchive('astar', { release: 'FireSquid' }),
+      chain: 'wss://public-rpc.pinknode.io/astar'
   })
-  .setTypesBundle("astar")
-  .addEvmLog(astarDegenscontract.address, {
-    range: { from: 442693 },
-    filter: [erc721.events["Transfer(address,address,uint256)"].topic],
-  })
-  .addEvmLog(astarCatsContract.address, {
-    range: { from: 800854 },
-    filter: [erc721.events["Transfer(address,address,uint256)"].topic],
-  });
-
-type Item = BatchProcessorItem<typeof processor>;
-type Context = BatchContext<Store, Item>;
-
-processor.run(database, async (ctx) => {
-  const transfersData: TransferData[] = [];
-
-  for (const block of ctx.blocks) {
-    for (const item of block.items) {
-      if (item.name === "EVM.Log") {
-        const transfer = handleTransfer(block.header, item.event);
-        transfersData.push(transfer);
-      }
+  .setBatchSize(1000)
+  .addCall('Ethereum.transact', { 
+    data: {
+      call: true
     }
-  }
+  })
 
-  await saveTransfers(ctx, transfersData);
-});
+processor.run(new TypeormDatabase(), async ctx => {
+  const txs: Transaction[] = []
+  for (let block of ctx.blocks) {
+    for (let item of block.items) {
+  
+      assert(item.kind == 'call');
+      
+      const callCtx = { block, call: item.call, _chain: ctx._chain }
+      
+      let data = getTransactionData((callCtx as any) as CallContext)
+      let serializedTransaction = ethers.utils.serializeTransaction(data.tx, data.signature)
+      let transaction = ethers.utils.parseTransaction(serializedTransaction)
 
-type TransferData = {
-  id: string;
-  from: string;
-  to: string;
-  token: string;
-  timestamp: bigint;
-  block: number;
-  transactionHash: string;
-  contractAddress: string;
-};
+      let input = decodeInput(transaction.data)
 
-function handleTransfer(
-  block: SubstrateBlock,
-  event: EvmLogEvent
-): TransferData {
-  const { from, to, tokenId } = erc721.events[
-    "Transfer(address,address,uint256)"
-  ].decode(event.args); 
+      if (transaction.to == undefined || transaction.from == undefined || input == undefined) {
+        ctx.log.debug(`Skipping tx ${transaction.hash}`)
+        continue;
+      }
+        
+      const tx = new Transaction({
+          id: callCtx.call.id,
+          block: block.header.height,
+          timestamp: new Date(block.header.timestamp),
+          txHash: transaction.hash,
+          from: transaction.from,
+          to: transaction.to,
+          type: transaction.type || 0,
+          method: input?.method || 'unknown',
+          input: toJSON(input)
+      })
+      ctx.log.debug(`Tx: ${tx.txHash}, From: ${tx.from} To: ${tx.to} Method: ${tx.method}`)
+      txs.push(tx)
+    }
+  } 
+  ctx.store.save(txs)
+})
 
-  const transfer: TransferData = {
-    id: event.id,
-    token: tokenId.toString(),
-    from,
-    to,
-    timestamp: BigInt(block.timestamp),
-    block: block.height,
-    transactionHash: event.evmTxHash,
-    contractAddress: event.args.address,
-  };
 
-  return transfer;
+function decodeInput(input: string): {method: string, args: any[]} | undefined {
+    let sighash = input.slice(0, 10)
+
+    switch (sighash) {
+        case erc20.functions['approve(address,uint256)'].sighash: {
+            const decoded = erc20.functions['approve(address,uint256)'].decode(input)
+            return {
+                method: 'approve',
+                args: [decoded[0], decoded[1].toBigInt()]
+            }
+        }
+        case erc20.functions['transfer(address,uint256)'].sighash: {
+            const decoded = erc20.functions['transfer(address,uint256)'].decode(input)
+            return {
+                method: 'transfer',
+                args: [decoded[0], decoded[1].toBigInt()]
+            }
+        }
+        case erc20.functions['transferFrom(address,address,uint256)'].sighash: {
+            const decoded = erc20.functions['transferFrom(address,address,uint256)'].decode(input)
+            return {
+                method: 'transferFrom',
+                args: [decoded[0], decoded[0], decoded[2].toBigInt()]
+            }
+        }
+        default:
+            return undefined
+    }
 }
 
-async function saveTransfers(ctx: Context, transfersData: TransferData[]) {
-  const tokensIds: Set<string> = new Set();
-  const ownersIds: Set<string> = new Set();
 
-  function getCollectionAndTokenId (transferData: TransferData): string{
-    return `${contractMapping.get(transferData.contractAddress)?.contractModel.symbol || ""}-${transferData.token}`;
-  }
+function getTransactionData(ctx: CallContext): {tx: UnsignedTransaction, signature: SignatureLike} {
+    let call = new EthereumTransactCall(ctx)
 
-  for (const transferData of transfersData) {
-    tokensIds.add(getCollectionAndTokenId(transferData));
-    ownersIds.add(transferData.from);
-    ownersIds.add(transferData.to);
-  }
-
-  const transfers: Set<Transfer> = new Set();
-
-  const tokens: Map<string, Token> = new Map(
-    (await ctx.store.findBy(Token, { id: In([...tokensIds]) })).map((token) => [
-      token.id,
-      token,
-    ])
-  );
-
-  const owners: Map<string, Owner> = new Map(
-    (await ctx.store.findBy(Owner, { id: In([...ownersIds]) })).map((owner) => [
-      owner.id,
-      owner,
-    ])
-  );
-
-  for (const transferData of transfersData) {
-    let from = owners.get(transferData.from);
-    if (from == null) {
-      from = new Owner({ id: transferData.from, balance: 0n });
-      owners.set(from.id, from);
+    if (call.isV1) {
+        const data = call.asV1.transaction
+        return {
+            tx: {
+                to: data.action.__kind === 'Call' ? toHex(data.action.value) : undefined,
+                nonce: Number(data.nonce[0]),
+                gasLimit: data.gasLimit[0],
+                gasPrice: data.gasPrice[0],
+                value: data.value[0],
+                data: data.input,
+                type: 0,
+            },
+            signature: {
+                v: Number(data.signature.v),
+                r: toHex(data.signature.r),
+                s: toHex(data.signature.s),
+            }
+        }
+    } else if (call.isV9) {
+        const transaction = call.asV9.transaction
+        switch (transaction.__kind) {
+            case 'Legacy': {
+                const data = transaction.value
+                return {
+                    tx: {
+                        to: data.action.__kind === 'Call' ? toHex(data.action.value) : undefined,
+                        nonce: Number(data.nonce[0]),
+                        gasLimit: data.gasLimit[0],
+                        gasPrice: data.gasPrice[0],
+                        value: data.value[0],
+                        data: data.input,
+                        type: 0,
+                    },
+                    signature: {
+                        v: Number(data.signature.v),
+                        r: toHex(data.signature.r),
+                        s: toHex(data.signature.s),
+                    }
+                }
+            }
+            case 'EIP1559': {
+                const data = transaction.value
+                return {
+                    tx: {
+                        to: data.action.__kind === 'Call' ? toHex(data.action.value) : undefined,
+                        nonce: Number(data.nonce[0]),
+                        gasLimit: data.gasLimit[0],
+                        maxFeePerGas: data.maxFeePerGas[0],
+                        maxPriorityFeePerGas: data.maxPriorityFeePerGas[0],
+                        value: data.value[0],
+                        data: data.input,
+                        chainId: Number(data.chainId),
+                        accessList: data.accessList.map((a) => [
+                            toHex(a.address),
+                            a.storageKeys.map((k) => toHex(k))
+                        ]) as [string, string[]][],
+                        type: 2,
+                    },
+                    signature: {
+                        r: toHex(data.r),
+                        s: toHex(data.s),
+                        v: Number(data.chainId),
+                    }
+                }
+            }
+            case 'EIP2930': {
+                const data = transaction.value
+                return {
+                    tx: {
+                        to: data.action.__kind === 'Call' ? toHex(data.action.value) : undefined,
+                        nonce: Number(data.nonce[0]),
+                        gasLimit: data.gasLimit[0],
+                        gasPrice: data.gasPrice[0],
+                        value: data.value[0],
+                        data: data.input,
+                        chainId: Number(data.chainId),
+                        accessList: data.accessList.map((a) => [
+                            toHex(a.address),
+                            a.storageKeys.map((k) => toHex(k))
+                        ]) as [string, string[]][],
+                        type: 1,
+                    },
+                    signature: {
+                        r: toHex(data.r),
+                        s: toHex(data.s),
+                        v: Number(data.chainId),
+                    }
+                }
+            }
+        }
+    } else {
+        throw new Error()
     }
-
-    let to = owners.get(transferData.to);
-    if (to == null) {
-      to = new Owner({ id: transferData.to, balance: 0n });
-      owners.set(to.id, to);
-    }
-
-    let token = tokens.get(getCollectionAndTokenId(transferData));
-    if (token == null) {
-      token = new Token({
-        id: getCollectionAndTokenId(transferData),
-        uri: await getTokenURI(transferData.token, transferData.contractAddress),
-        contract: await getContractEntity(ctx.store, transferData.contractAddress),
-      });
-      tokens.set(token.id, token);
-    }
-    token.owner = to;
-
-    const { id, block, transactionHash, timestamp } = transferData;
-
-    const transfer = new Transfer({
-      id,
-      block,
-      timestamp,
-      transactionHash,
-      from,
-      to,
-      token,
-    });
-
-    transfers.add(transfer);
-  }
-
-  await ctx.store.save([...owners.values()]);
-  await ctx.store.save([...tokens.values()]);
-  await ctx.store.save([...transfers]);
 }
