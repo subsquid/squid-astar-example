@@ -18,7 +18,7 @@ processor.setDataSource({
       archive: lookupArchive('astar', { release: 'FireSquid' }),
       chain: process.env.PINKNODE_ASTAR_GRPC || 'wss://public-rpc.pinknode.io/astar'
   })
-  .setBatchSize(10)
+  .setBatchSize(100)
   .addCall('Ethereum.transact', { 
     data: {
       call: true
