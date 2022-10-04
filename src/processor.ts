@@ -1,24 +1,39 @@
 import {SubstrateBatchProcessor, SubstrateProcessor, toHex} from '@subsquid/substrate-processor'
 import {TypeormDatabase} from '@subsquid/typeorm-store'
-import {ethers, UnsignedTransaction} from 'ethers'
-import {SignatureLike} from '@ethersproject/bytes'
+import * as fs from 'fs' 
 import * as erc20 from './erc20'
 import {Transaction} from './model'
-import {EthereumTransactCall} from './types/calls'
-import {CallContext} from './types/support'
-import {toJSON} from '@subsquid/util-internal-json'
 import { lookupArchive } from '@subsquid/archive-registry'
 import assert from 'assert'
+import { getTransaction } from '@subsquid/substrate-frontier-evm'
+import { TransactionType } from '@subsquid/substrate-frontier-evm/lib/transaction'
 
+const APPROVE_MAX_VALUE=115792089237316195423570985008687907853269984665640564039457584007913129639935n
+
+// append on restarts
+const csvWriter = fs.createWriteStream(`${__dirname}/../assets/erc20.csv`, { flags: 'w', encoding: "utf-8" })
+csvWriter.write(`id,block,timestamp,txHash,from,to,type,method,amount\n`)
 
 const processor = new SubstrateBatchProcessor()
-
 
 processor.setDataSource({
       archive: lookupArchive('astar', { release: 'FireSquid' }),
   })
   .setBatchSize(100)
-  .addCall('Ethereum.transact', { 
+  .addEthereumTransaction('*', { 
+    sighash: erc20.functions['approve(address,uint256)'].sighash,
+    data: {
+      call: true
+    }
+  })
+  .addEthereumTransaction('*', { 
+    sighash: erc20.functions['transfer(address,uint256)'].sighash,
+    data: {
+      call: true
+    }
+  })
+  .addEthereumTransaction('*', { 
+    sighash: erc20.functions['transferFrom(address,address,uint256)'].sighash,
     data: {
       call: true
     }
@@ -31,163 +46,66 @@ processor.run(new TypeormDatabase(), async ctx => {
   
       assert(item.kind == 'call');
       
-      const callCtx = { block, call: item.call, _chain: ctx._chain }
-      
-      let data = getTransactionData((callCtx as any) as CallContext)
-      let serializedTransaction = ethers.utils.serializeTransaction(data.tx, data.signature)
-      let transaction = ethers.utils.parseTransaction(serializedTransaction)
+      let txData = getTransaction(ctx, item.call as any)
+      //let serializedTransaction = ethers.utils.serializeTransaction(data.tx, data.signature)
+      //let transaction = ethers.utils.parseTransaction(serializedTransaction)
+      let erc20Data = decodeErc20Data(txData.input)
 
-      let input = decodeInput(transaction.data)
-
-      if (transaction.to == undefined || transaction.from == undefined) {
-        ctx.log.debug(`Skipping tx ${transaction.hash}`)
+      if (txData.to == undefined || txData.from == undefined) {
+        ctx.log.debug(`Skipping tx ${txData.hash}`)
         continue;
       }
         
       const tx = new Transaction({
-          id: callCtx.call.id,
+          id: item.call.id,
           block: block.header.height,
           timestamp: new Date(block.header.timestamp),
-          txHash: transaction.hash,
-          from: transaction.from,
-          to: transaction.to,
-          type: transaction.type || 0,
-          method: input.method,
-          input: toJSON(input)
+          txHash: txData.hash,
+          from: txData.from,
+          to: txData.to,
+          type: txData.type || 0,
+          method: erc20Data.method,
+          amount: erc20Data.value
       })
       ctx.log.debug(`Tx: ${tx.txHash}, From: ${tx.from} To: ${tx.to} Method: ${tx.method}`)
       txs.push(tx)
     }
   } 
-  await ctx.store.save(txs)
+  for (const tx of txs) {
+    csvWriter.write(`${tx.id},${tx.block},${tx.timestamp.getTime()},${tx.txHash},${tx.from},${tx.to},${TransactionType[tx.type]},${tx.method},${tx.amount}\n`)
+  }
 })
 
 
-function decodeInput(input: string): {method: string, args: any[]}  {
+function decodeErc20Data(input: string): {method: string, value: bigint}  {
     let sighash = input.slice(0, 10)
 
     switch (sighash) {
         case erc20.functions['approve(address,uint256)'].sighash: {
             const decoded = erc20.functions['approve(address,uint256)'].decode(input)
+            let v = decoded[1].toBigInt()
             return {
                 method: 'approve',
-                args: [decoded[0], decoded[1].toBigInt()]
+                // -1 means approve
+                value: v == APPROVE_MAX_VALUE ? -1n : v
             }
         }
         case erc20.functions['transfer(address,uint256)'].sighash: {
             const decoded = erc20.functions['transfer(address,uint256)'].decode(input)
             return {
                 method: 'transfer',
-                args: [decoded[0], decoded[1].toBigInt()]
+                value: decoded[1].toBigInt()
             }
         }
         case erc20.functions['transferFrom(address,address,uint256)'].sighash: {
             const decoded = erc20.functions['transferFrom(address,address,uint256)'].decode(input)
             return {
                 method: 'transferFrom',
-                args: [decoded[0], decoded[0], decoded[2].toBigInt()]
+                value: decoded[2].toBigInt()
             }
         }
         default:
-            return  { method: 'unknown', args: [input] }
+            return  { method: 'unknown', value: 0n }
     }
 }
 
-
-function getTransactionData(ctx: CallContext): {tx: UnsignedTransaction, signature: SignatureLike} {
-    let call = new EthereumTransactCall(ctx)
-
-    if (call.isV1) {
-        const data = call.asV1.transaction
-        return {
-            tx: {
-                to: data.action.__kind === 'Call' ? toHex(data.action.value) : undefined,
-                nonce: Number(data.nonce[0]),
-                gasLimit: data.gasLimit[0],
-                gasPrice: data.gasPrice[0],
-                value: data.value[0],
-                data: data.input,
-                type: 0,
-            },
-            signature: {
-                v: Number(data.signature.v),
-                r: toHex(data.signature.r),
-                s: toHex(data.signature.s),
-            }
-        }
-    } else if (call.isV9) {
-        const transaction = call.asV9.transaction
-        switch (transaction.__kind) {
-            case 'Legacy': {
-                const data = transaction.value
-                return {
-                    tx: {
-                        to: data.action.__kind === 'Call' ? toHex(data.action.value) : undefined,
-                        nonce: Number(data.nonce[0]),
-                        gasLimit: data.gasLimit[0],
-                        gasPrice: data.gasPrice[0],
-                        value: data.value[0],
-                        data: data.input,
-                        type: 0,
-                    },
-                    signature: {
-                        v: Number(data.signature.v),
-                        r: toHex(data.signature.r),
-                        s: toHex(data.signature.s),
-                    }
-                }
-            }
-            case 'EIP1559': {
-                const data = transaction.value
-                return {
-                    tx: {
-                        to: data.action.__kind === 'Call' ? toHex(data.action.value) : undefined,
-                        nonce: Number(data.nonce[0]),
-                        gasLimit: data.gasLimit[0],
-                        maxFeePerGas: data.maxFeePerGas[0],
-                        maxPriorityFeePerGas: data.maxPriorityFeePerGas[0],
-                        value: data.value[0],
-                        data: data.input,
-                        chainId: Number(data.chainId),
-                        accessList: data.accessList.map((a) => [
-                            toHex(a.address),
-                            a.storageKeys.map((k) => toHex(k))
-                        ]) as [string, string[]][],
-                        type: 2,
-                    },
-                    signature: {
-                        r: toHex(data.r),
-                        s: toHex(data.s),
-                        v: Number(data.chainId),
-                    }
-                }
-            }
-            case 'EIP2930': {
-                const data = transaction.value
-                return {
-                    tx: {
-                        to: data.action.__kind === 'Call' ? toHex(data.action.value) : undefined,
-                        nonce: Number(data.nonce[0]),
-                        gasLimit: data.gasLimit[0],
-                        gasPrice: data.gasPrice[0],
-                        value: data.value[0],
-                        data: data.input,
-                        chainId: Number(data.chainId),
-                        accessList: data.accessList.map((a) => [
-                            toHex(a.address),
-                            a.storageKeys.map((k) => toHex(k))
-                        ]) as [string, string[]][],
-                        type: 1,
-                    },
-                    signature: {
-                        r: toHex(data.r),
-                        s: toHex(data.s),
-                        v: Number(data.chainId),
-                    }
-                }
-            }
-        }
-    } else {
-        throw new Error()
-    }
-}

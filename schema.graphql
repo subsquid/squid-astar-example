@@ -8,7 +8,8 @@ type Transaction @entity {
   type: Int!
   input: JSON!
   method: String!
-  data: TransactionData 
+  data: TransactionData
+  amount: BigInt
 }
 
 union TransactionData = Legacy | EIP2930 | EIP1559
