@@ -6,9 +6,10 @@ It tracks all `Ethereum.transact` calls on Astar and extracts basic information:
 - `to` address
 - Tx input
 - Tx hash
-- Method (tries to detect: `Approve`, `Transfer`, `TransferFrom`)
+- Method sighash (first four bytes of the Tx input)
+- Value (if it was one of ERC20 `approve`, `transfer` or `transferFrom`)
 
-If either `to`,`from` or `input` is `null`, the transaction is skipped. 
+The results are saved into a `assets/astar-transactions.csv` and can later be analyzed by tools such as DuckDB.
 
 For more info consult the [docs](https://docs.subsquid.io).
 
@@ -29,14 +30,6 @@ make build
 # 3. Start target Postgres database
 make up
 
-# 5. Now start the processor
+# 5. Now start the processor. The CSV file should appear in the assets folder
 make process
-
-# 6. The above command will block the terminal
-#    being busy with fetching the chain data, 
-#    transforming and storing it in the target database.
-#
-#    To start the graphql server open the separate terminal
-#    and run. The server is started at http://localhost:4350/
-npx squid-graphql-server
 ```
