@@ -7,4 +7,4 @@
 /.idea
 
 # Large data files
-/assets/*.csv
+#/assets/*.csv
