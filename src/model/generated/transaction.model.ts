@@ -36,7 +36,7 @@ export class Transaction {
   input!: unknown
 
   @Column_("text", {nullable: false})
-  method!: string
+  sighash!: string
 
   @Column_("jsonb", {transformer: {to: obj => obj == null ? undefined : obj.toJSON(), from: obj => obj == null ? undefined : fromJsonTransactionData(obj)}, nullable: true})
   data!: TransactionData | undefined | null

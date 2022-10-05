@@ -5,3 +5,6 @@
 
 # IDE files
 /.idea
+
+# Large data files
+/assets/*.csv

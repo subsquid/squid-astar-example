@@ -7,7 +7,7 @@ type Transaction @entity {
   txHash: String! @index
   type: Int!
   input: JSON!
-  method: String!
+  sighash: String!
   data: TransactionData
   amount: BigInt
 }
