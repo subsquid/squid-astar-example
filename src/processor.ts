@@ -1,11 +1,10 @@
-import {SubstrateBatchProcessor, SubstrateProcessor, toHex} from '@subsquid/substrate-processor'
+import {SubstrateBatchProcessor} from '@subsquid/substrate-processor'
 import {TypeormDatabase} from '@subsquid/typeorm-store'
 import * as fs from 'fs' 
 import * as erc20 from './erc20'
 import {Transaction} from './model'
 import { lookupArchive } from '@subsquid/archive-registry'
-import assert from 'assert'
-import { getEvmLog, getTransaction } from '@subsquid/substrate-frontier-evm'
+import { getTransaction } from '@subsquid/substrate-frontier-evm'
 import { TransactionType } from '@subsquid/substrate-frontier-evm/lib/transaction'
 
 const APPROVE_MAX_VALUE=115792089237316195423570985008687907853269984665640564039457584007913129639935n
