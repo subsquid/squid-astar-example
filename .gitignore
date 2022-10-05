@@ -8,4 +8,4 @@
 /.DS_Store
 
 # Large data files
-#/assets/*.csv
+/assets/*.csv
