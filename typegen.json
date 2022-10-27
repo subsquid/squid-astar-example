@@ -1,8 +1,6 @@
-
 {
   "outDir": "src/types",
-  "specVersions": "https://astar.archive.subsquid.io/graphql",
-  "calls": [
-    "Ethereum.transact"
-  ]
+  "specVersions": "https://moonriver.archive.subsquid.io/graphql",
+  "events": [],
+  "calls": []
 }

@@ -5,7 +5,3 @@
 
 # IDE files
 /.idea
-/.DS_Store
-
-# Large data files
-/assets/*.csv
